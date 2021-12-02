@@ -1,8 +1,10 @@
 import numpy as np
 from dijkstar import Graph, find_path
 
-from parameters import FNAME_PLAN
+from parameters import FNAME_PLAN, GAMMA, N_GOALS
 import matplotlib.pyplot as plt
+from scipy import signal
+from skimage.feature import peak_local_max
 
 
 def dummy_cost_func(a, b, c, d):
@@ -69,13 +71,24 @@ def generate_random_goals(env_grid, n_goals):
     generate n random goals within the grid that are given by coordinated of unoccupied cells
     :return: list of n_goals
     """
+    generated_goals = list()
+    while (len(generated_goals) < n_goals):
+        i = np.random.randint(0, env_grid.shape[0])
+        j = np.random.randint(0, env_grid.shape[1])
 
-def get_node_distance(graph, source_node_id, goal_node_id):
+        coods = (i, j)
+        if coods not in generated_goals and env_grid[coods] == 0:
+            generated_goals.append(coods)
+
+    return generated_goals
+
+
+def get_node_value(graph, source_node_id, goal_node_id, gamma):
     try:
-        return sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
+        return gamma**sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
     except:
-        return -1
-def get_value_functions(env_grid, env_graph, generated_goals):
+        return 0
+def get_value_functions(env_grid, env_graph, generated_goals, gamma):
     """
     generate 3D array that hold value functions for all n goals in generated goals list
     :param env_grid:
@@ -85,34 +98,43 @@ def get_value_functions(env_grid, env_graph, generated_goals):
 
     n_goals = len(generated_goals)
 
+    value_fcts = np.ones((env_grid.shape + (n_goals,))) * 0
+
     for g, goal in enumerate(generated_goals):
 
-        goal = generated_goals[0]
+        goal = generated_goals[g]
         goal_node_id = goal[0]*env_grid.shape[1] + goal[1]
-
-        value_fcts = np.ones((env_grid.shape + (n_goals,)))*-10
 
         node_id = 0
         for i in range(env_grid.shape[0]):
             for j in range(env_grid.shape[1]):
-                value_fcts[i, j, g] = get_node_distance(env_graph, node_id, goal_node_id)
+                value_fcts[i, j, g] = get_node_value(env_graph, node_id, goal_node_id, gamma)
                 node_id += 1
 
-        return value_fcts
+    return value_fcts
 
 
 def main():
 
     env_grid = read_input_grid_from_file(FNAME_PLAN)
     env_graph = convert_grid_to_graph(env_grid)
-    print("HALLO")
-    #generated_goals = generate_random_goals(env_grid)
-    generated_goals = [(1, 1)]
-    value_functions = get_value_functions(env_grid, env_graph, generated_goals)
-    print("HALLO")
+    generated_goals = generate_random_goals(env_grid, N_GOALS)
+    value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
 
-    plt.imshow(value_functions[:, :, 0])
-    plt.show()
+    # for g in range(len(generated_goals)):
+    #     plt.imshow(value_functions[:, :, g])
+    #     plt.show()
+
+    averaged_values = np.average(value_functions, axis=2)
+    plt.imshow(averaged_values)
+
+    for goal in generated_goals:
+        plt.plot(goal[1], goal[0], marker='.', color="red")
+
+    maximums = peak_local_max(averaged_values)
+
+    for maximum in maximums:
+        plt.plot(maximum[1], maximum[0], marker='v', color="black")
 
     print("HALLO")
 

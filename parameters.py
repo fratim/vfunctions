@@ -1,1 +1,3 @@
 FNAME_PLAN = "plan.txt"
+GAMMA = 0.95
+N_GOALS = 70
