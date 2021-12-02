@@ -33,6 +33,10 @@ def convert_grid_to_graph(grid):
             # add below edge if not outside of grid and not blocked
             if (i + 1) < grid.shape[0] and grid[i + 1, j] == 0:
                 graph.add_edge(node_id, node_id + grid.shape[1])
+            # add bottom right edge if not outside
+            if ((i + 1) < grid.shape[0] and (j + 1) < grid.shape[1]
+                    and grid[i + 1, j + 1] == 0):
+                graph.add_edge(node_id, node_id + grid.shape[1] + 1)
 
             print(graph)
             # increase node_counter
@@ -86,6 +90,7 @@ def generate_random_goals(env_grid, n_goals):
 def get_node_value(graph, source_node_id, goal_node_id, gamma):
     try:
         return gamma**sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
+        #return sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
     except:
         return 0
 def get_value_functions(env_grid, env_graph, generated_goals, gamma):
@@ -131,7 +136,7 @@ def main():
     for goal in generated_goals:
         plt.plot(goal[1], goal[0], marker='.', color="red")
 
-    maximums = peak_local_max(averaged_values)
+    maximums = peak_local_max(averaged_values, exclude_border=False)
 
     for maximum in maximums:
         plt.plot(maximum[1], maximum[0], marker='v', color="black")
