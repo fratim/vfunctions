@@ -1,0 +1,1 @@
+FNAME_PLAN = "plan.txt"
