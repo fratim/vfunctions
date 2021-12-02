@@ -38,7 +38,6 @@ def convert_grid_to_graph(grid):
                     and grid[i + 1, j + 1] == 0):
                 graph.add_edge(node_id, node_id + grid.shape[1] + 1)
 
-            print(graph)
             # increase node_counter
             node_id += 1
 
@@ -142,8 +141,6 @@ def main():
         plt.plot(maximum[1], maximum[0], marker='v', color="black")
 
     print("HALLO")
-
-
 
 
 if __name__ == "__main__":
