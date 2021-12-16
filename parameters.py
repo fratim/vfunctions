@@ -1,3 +1,11 @@
-FNAME_PLAN = "plan.txt"
-GAMMA = 0.99
-N_GOALS = 100
+#FNAME_PLAN = "plan_3.txt"
+#FNAME_PLAN = "maze/new_maze.txt"
+FNAME_PLAN = "plan_free.txt"
+GAMMA = 0.5
+N_GOALS = "ALL"
+
+#ROW_LIMITS = (0, 5)
+#COLUMN_LIMITS = (6, 11)
+
+ROW_LIMITS = None
+COLUMN_LIMITS = None
