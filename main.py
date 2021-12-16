@@ -8,6 +8,8 @@ from skimage.feature import peak_local_max
 
 from scipy.special import softmax
 
+SOFTMAX_MULTIPLIER = 1000
+
 
 def dummy_cost_func(a, b, c, d):
     return 1
@@ -173,7 +175,7 @@ def get_policies(env_grid, env_graph, generated_goals):
         for i in range(env_grid.shape[0]):
             for j in range(env_grid.shape[1]):
                 nb_distances = get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id)
-                policy = softmax(1/(nb_distances+0.001))
+                policy = softmax(SOFTMAX_MULTIPLIER*1/(nb_distances+0.001))
                 policies[i, j, g, :] = policy
                 node_id += 1
 
@@ -223,7 +225,8 @@ def plot_optimal_actions(rows, cols, goal, distances, offset, color):
     for i in range(rows):
         for j in range(cols):
 
-            best_actions = np.argwhere(distances[i, j, goal, :] == np.max(distances[i, j, goal, :] ))
+            nb_distances = np.around(distances[i, j, goal, :] , 4)
+            best_actions = np.argwhere(nb_distances == np.max(nb_distances))
             best_action_icons = []
             for action in best_actions:
                 best_action_icons.append(ACTIONID_TO_ACTION_DICT[str(action[0])])
@@ -242,19 +245,19 @@ def main():
     env_grid = read_input_grid_from_file(FNAME_PLAN)
     env_graph = convert_grid_to_graph(env_grid)
     #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
-    generated_goals = [(0, 0), (0, env_grid.shape[0]-1)]
+    generated_goals = [(0, 2), (2, 0), (2, env_grid.shape[1]-1)]
     policies = get_policies(env_grid, env_graph, generated_goals)
     value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
 
 
-    plt.imshow(value_functions[:, :, 0])
+    plt.imshow(np.mean(value_functions, axis=2))
     plt.show()
 
-    colors = ["red", "blue", "yellow"]
+    colors = ["yellow", "red", "blue"]
     offset = -0.3
     for g in range(len(generated_goals)):
         plot_optimal_actions(env_grid.shape[0], env_grid.shape[1], g, policies, offset, colors[g])
-        offset += 0.15
+        offset += 0.2
 
     ## plot average policy
     avg_policies = np.mean(policies, axis=2, keepdims=True)
