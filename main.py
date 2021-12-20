@@ -5,6 +5,7 @@ import copy
 from parameters import *
 import matplotlib.pyplot as plt
 from scipy.special import softmax
+from skimage.feature import peak_local_max
 
 
 def dummy_cost_func(a, b, c, d):
@@ -317,13 +318,30 @@ def plot_optimal_action_for_all_goals(ax, policies, init_offset):
 
 def plot_optimal_action_for_average_policy(ax, avg_policy, curr_offset):
     plot_optimal_actions(avg_policy.shape[0], avg_policy.shape[1], 0, avg_policy, curr_offset, "black")
-    
 
-def make_plots(value_functions, policies, avg_policies):
+def plot_goal_positions(ax, goals):
+    for goal in goals:
+        ax.plot(goal[1], goal[0], marker='.', color="red")
+
+
+def plot_local_value_maxima(avg_values, goals):
+
+    maxima = peak_local_max(avg_values, exclude_border=False)
+
+    for maximum in maxima:
+        if tuple((maximum[0], maximum[1])) in goals and N_GOALS!= "ALL":
+            color = "red"
+        else:
+            color = "black"
+
+        plt.plot(maximum[1], maximum[0], marker='v', color=color)
+
+
+def make_plots(value_functions, avg_values, policies, avg_policies, goals):
     fig, ax = plt.subplots()
 
     # colorplot mean values
-    colorplot_values(ax, np.mean(value_functions, axis=2))
+    colorplot_values(ax, avg_values)
 
     # plot optimal actions for all goals
     curr_offset = plot_optimal_action_for_all_goals(ax, policies, init_offset=-0.3)
@@ -331,42 +349,40 @@ def make_plots(value_functions, policies, avg_policies):
     # plot optimal action for average policy underneath in black
     curr_offset = plot_optimal_action_for_average_policy(ax, avg_policies, curr_offset)
 
-    print("HALLO")
+    # plot positions of all goals in red
+    # TODO change colors to respective goal policy colors
+    plot_goal_positions(ax, goals)
 
-    # averaged_values = np.average(value_functions, axis=2)
-    # plt.imshow(averaged_values)
+    # plot local maxima in value function
+    plot_local_value_maxima(avg_values, goals)
 
-    # for goal in generated_goals:
-    #    plt.plot(goal[1], goal[0], marker='.', color="red")
-
-    # maximums = peak_local_max(averaged_values, exclude_border=False)
-
-    # for maximum in maximums:
-    #     if tuple((maximum[0], maximum[1])) in generated_goals and N_GOALS!= "ALL":
-    #         color = "red"
-    #     else:
-    #         color = "black"
-    #
-    #     plt.plot(maximum[1], maximum[0], marker='v', color=color)
-
-    plt.savefig("plot_actions.png")
+    fig.savefig("plot.png")
 
 
 def main():
 
+    # read grid and convert to graph
     env_grid = read_input_grid_from_file(FNAME_PLAN)
     env_graph = convert_grid_to_graph(env_grid)
+
+    # generate or specify goals
     #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
     horiz_center = int(env_grid.shape[1]/2)
     generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.shape[1]-1), (5, horiz_center)]
-    policies = get_policies(env_grid, env_graph, generated_goals)
+
+    # compute value functions for all goals
     value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
-    avg_policies = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
 
-    make_plots(value_functions, policies, avg_policies)
 
-    print("HALLO")
+    # compute policies for all goals
+    policies = get_policies(env_grid, env_graph, generated_goals)
+    avg_values = np.mean(value_functions, axis=2)
 
+    # compute weighted average policy
+    avg_policy = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
+
+    # make various plots
+    make_plots(value_functions, avg_values, policies, avg_policy, generated_goals)
 
 if __name__ == "__main__":
     main()
