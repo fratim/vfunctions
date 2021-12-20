@@ -1,14 +1,10 @@
 import numpy as np
 from dijkstar import Graph, find_path
+import copy
 
-from parameters import FNAME_PLAN, GAMMA, N_GOALS, ROW_LIMITS, COLUMN_LIMITS
+from parameters import *
 import matplotlib.pyplot as plt
-from scipy import signal
-from skimage.feature import peak_local_max
-
 from scipy.special import softmax
-
-SOFTMAX_MULTIPLIER = 1000
 
 
 def dummy_cost_func(a, b, c, d):
@@ -22,7 +18,11 @@ ACTIONID_TO_ACTION_DICT = {
     "4": "^",
 }
 
-def convert_grid_to_graph(grid):
+def g_node_id(row, col, n_columns):
+    return row*n_columns + col
+
+
+def convert_grid_to_graph(grid, diagonal_movements_possible=False):
     """
 
     :param grid: input 2d numpy array grid
@@ -31,30 +31,30 @@ def convert_grid_to_graph(grid):
 
     graph = Graph(undirected=True)
 
-    node_id = 0
     for i in range(grid.shape[0]):
         for j in range(grid.shape[1]):
+
             # if node is blocked, no connections are established
             if grid[i, j] != 0:
-                node_id += 1
                 continue
+
+            node_id = g_node_id(i, j, grid.shape[1])
 
             # add right edge if not last row and not blocked
             if (j + 1) < grid.shape[1] and grid[i, j + 1] == 0:
                 graph.add_edge(node_id, node_id + 1)
+
             # add below edge if not outside of grid and not blocked
             if (i + 1) < grid.shape[0] and grid[i + 1, j] == 0:
                 graph.add_edge(node_id, node_id + grid.shape[1])
-            # # add bottom right edge if not outside
-            # if ((i + 1) < grid.shape[0] and (j + 1) < grid.shape[1]
-            #         and grid[i + 1, j + 1] == 0):
-            #     graph.add_edge(node_id, node_id + grid.shape[1] + 1)
 
-            # increase node_counter
-            node_id += 1
+            if diagonal_movements_possible:
+                # # add bottom right edge if not outside
+                if ((i + 1) < grid.shape[0] and (j + 1) < grid.shape[1]
+                        and grid[i + 1, j + 1] == 0):
+                    graph.add_edge(node_id, node_id + grid.shape[1] + 1)
 
     return graph
-
 
 
 def read_grid_map(grid_map_path):
@@ -72,6 +72,7 @@ def read_grid_map(grid_map_path):
     )
     return grid_map_array
 
+
 def read_input_grid_from_file(fname):
     """
     read from text file and return 2D array that is 0 where cells are unoccupied and 1 where occupied
@@ -80,6 +81,7 @@ def read_input_grid_from_file(fname):
     """
 
     return read_grid_map(fname)
+
 
 def generate_random_goals(env_grid, n_goals, row_limits=None, column_limits=None):
     """
@@ -114,15 +116,31 @@ def generate_random_goals(env_grid, n_goals, row_limits=None, column_limits=None
 
 
 def get_node_value(graph, source_node_id, goal_node_id, gamma):
+    """
+    returns the value function value for a node, which is computed using the discount factor and the distance to goal
+    :param graph:
+    :param source_node_id:
+    :param goal_node_id:
+    :param gamma:
+    :return:
+    """
     distance = get_distance(graph, source_node_id, goal_node_id)
     return gamma**distance
 
+
 def get_distance(graph, source_node_id, goal_node_id):
+    """
+    get distance between source node and goal node
+    if except, no path can be found and large distance is returned
+    :param graph:
+    :param source_node_id:
+    :param goal_node_id:
+    :return:
+    """
     try:
         return sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
     except:
-        return 1000
-
+        return NODE_DISTANCE_IF_NO_PATH
 
 
 def get_value_functions(env_grid, env_graph, generated_goals, gamma):
@@ -142,15 +160,15 @@ def get_value_functions(env_grid, env_graph, generated_goals, gamma):
         print(f"at {g} of {n_goals}")
 
         goal = generated_goals[g]
-        goal_node_id = goal[0]*env_grid.shape[1] + goal[1]
+        goal_node_id = g_node_id(*goal, env_grid.shape[1])
 
-        node_id = 0
         for i in range(env_grid.shape[0]):
             for j in range(env_grid.shape[1]):
+                node_id = g_node_id(i, j, env_grid.shape[1])
                 value_fcts[i, j, g] = get_node_value(env_graph, node_id, goal_node_id, gamma)
-                node_id += 1
 
     return value_fcts
+
 
 def get_policies(env_grid, env_graph, generated_goals):
     """
@@ -175,13 +193,25 @@ def get_policies(env_grid, env_graph, generated_goals):
         for i in range(env_grid.shape[0]):
             for j in range(env_grid.shape[1]):
                 nb_distances = get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id)
-                policy = softmax(SOFTMAX_MULTIPLIER*1/(nb_distances+0.001))
+                policy = softmax(SOFTMAX_MULTIPLIER*1/(nb_distances+SOFTMAX_EPSILON))
                 policies[i, j, g, :] = policy
                 node_id += 1
 
     return policies
 
+
 def get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id):
+    """
+    get the distance to goal for all neighboring cells of a specific cell
+    this can then be used to find the shortest-path action to the goal from a given cell
+    :param env_grid:
+    :param env_graph:
+    :param i:
+    :param j:
+    :param node_id:
+    :param goal_node_id:
+    :return:
+    """
     pb_actions = [0, 1, 2, 3, 4] # put, right, down, left, up
     goal_distances = np.ones((1, len(pb_actions)))*np.nan
 
@@ -222,6 +252,16 @@ def get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id):
 
 
 def plot_optimal_actions(rows, cols, goal, distances, offset, color):
+    """
+    plots action that is chosen with highest probability
+    :param rows:
+    :param cols:
+    :param goal:
+    :param distances:
+    :param offset:
+    :param color:
+    :return:
+    """
     for i in range(rows):
         for j in range(cols):
 
@@ -231,14 +271,9 @@ def plot_optimal_actions(rows, cols, goal, distances, offset, color):
             for action in best_actions:
                 best_action_icons.append(ACTIONID_TO_ACTION_DICT[str(action[0])])
 
-            #max_value = np.max(values[y, x, :])
-            #max_value_str = "{:.2f}".format(max_value)
-
-            #for icon in best_action_icons:
-                #plt.plot(j, i, marker=icon, color="red")
-
             best_action_icons = ' '.join(best_action_icons)
             plt.text(j, i+offset, best_action_icons, color=color, ha='center', va='center')
+
 
 def compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid):
 
@@ -253,14 +288,13 @@ def compute_weighted_average_policies(policies, generated_goals, env_graph, env_
             goal_distances = np.ones((1, len(generated_goals)))*np.nan
 
             for goal_id, goal in enumerate(generated_goals):
-                goal_node_id = goal[0]*env_grid.shape[1] + goal[1]
+                goal_node_id = g_node_id(*goal, env_grid.shape[1])
                 goal_distances[0, goal_id] = get_distance(env_graph, curr_node_id, goal_node_id)
 
-            # p(g|s) assumed to be proportional to 0.9^(distance_to_g)
-            decay_factor = 0.9
+            # p(g|s) assumed to be proportional to GOAL_ASSIGNMENT_DECAY_FACTOR^(distance_to_g)
+            decay_factor = GOAL_ASSIGNMENT_DECAY_FACTOR
             goal_probabilities = np.ones((1, len(generated_goals)))*decay_factor
-            goal_probabilities = goal_probabilities**goal_distances**1.5
-
+            goal_probabilities = goal_probabilities**goal_distances
 
             for goal_id in range(len(generated_goals)):
                 avg_policies[i, j, 0, :] += goal_probabilities[0, goal_id]*state_policies[goal_id, :]
@@ -269,49 +303,43 @@ def compute_weighted_average_policies(policies, generated_goals, env_graph, env_
 
     return avg_policies
 
+def colorplot_values(ax, values):
+    ax.imshow(values)
 
-
-
-# TODO write function that gets node id
-
-
-def main():
-
-    env_grid = read_input_grid_from_file(FNAME_PLAN)
-    env_graph = convert_grid_to_graph(env_grid)
-    #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
-    #generated_goals = [(0, 2), (2, 0), (2, env_grid.shape[1]-1), (5, 2)]
-    horiz_center = int(env_grid.shape[1]/2)
-    generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.shape[1]-1), (5, horiz_center)]
-    policies = get_policies(env_grid, env_graph, generated_goals)
-    value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
-
-
-    plt.imshow(np.mean(value_functions, axis=2))
-    plt.show()
-
+def plot_optimal_action_for_all_goals(ax, policies, init_offset):
     colors = ["yellow", "red", "blue", "green"]
-    offset = -0.3
-    for g in range(len(generated_goals)):
-        plot_optimal_actions(env_grid.shape[0], env_grid.shape[1], g, policies, offset, colors[g])
+    offset = copy.deepcopy(init_offset)
+    for g in range(policies.shape[2]):
+        plot_optimal_actions(policies.shape[0], policies.shape[1], g, policies, offset, colors[g])
         offset += 0.15
 
-    ## plot average policy
-    #avg_policies = np.mean(policies, axis=2, keepdims=True)
+    return offset
 
-    avg_policies = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
+def plot_optimal_action_for_average_policy(ax, avg_policy, curr_offset):
+    plot_optimal_actions(avg_policy.shape[0], avg_policy.shape[1], 0, avg_policy, curr_offset, "black")
+    
 
-    plot_optimal_actions(env_grid.shape[0], env_grid.shape[1], 0, avg_policies, offset, "black")
+def make_plots(value_functions, policies, avg_policies):
+    fig, ax = plt.subplots()
+
+    # colorplot mean values
+    colorplot_values(ax, np.mean(value_functions, axis=2))
+
+    # plot optimal actions for all goals
+    curr_offset = plot_optimal_action_for_all_goals(ax, policies, init_offset=-0.3)
+
+    # plot optimal action for average policy underneath in black
+    curr_offset = plot_optimal_action_for_average_policy(ax, avg_policies, curr_offset)
 
     print("HALLO")
 
-    #averaged_values = np.average(value_functions, axis=2)
-    #plt.imshow(averaged_values)
+    # averaged_values = np.average(value_functions, axis=2)
+    # plt.imshow(averaged_values)
 
-    #for goal in generated_goals:
+    # for goal in generated_goals:
     #    plt.plot(goal[1], goal[0], marker='.', color="red")
 
-    #maximums = peak_local_max(averaged_values, exclude_border=False)
+    # maximums = peak_local_max(averaged_values, exclude_border=False)
 
     # for maximum in maximums:
     #     if tuple((maximum[0], maximum[1])) in generated_goals and N_GOALS!= "ALL":
@@ -322,6 +350,20 @@ def main():
     #     plt.plot(maximum[1], maximum[0], marker='v', color=color)
 
     plt.savefig("plot_actions.png")
+
+
+def main():
+
+    env_grid = read_input_grid_from_file(FNAME_PLAN)
+    env_graph = convert_grid_to_graph(env_grid)
+    #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
+    horiz_center = int(env_grid.shape[1]/2)
+    generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.shape[1]-1), (5, horiz_center)]
+    policies = get_policies(env_grid, env_graph, generated_goals)
+    value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
+    avg_policies = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
+
+    make_plots(value_functions, policies, avg_policies)
 
     print("HALLO")
 
