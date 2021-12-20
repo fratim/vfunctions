@@ -240,12 +240,49 @@ def plot_optimal_actions(rows, cols, goal, distances, offset, color):
             best_action_icons = ' '.join(best_action_icons)
             plt.text(j, i+offset, best_action_icons, color=color, ha='center', va='center')
 
+def compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid):
+
+    avg_policies = np.zeros((env_grid.shape)+(1, policies.shape[-1], ))
+
+    for i in range(policies.shape[0]):
+        for j in range(policies.shape[1]):
+
+            curr_node_id = i*env_grid.shape[1] + j
+
+            state_policies = policies[i, j, :, :]
+            goal_distances = np.ones((1, len(generated_goals)))*np.nan
+
+            for goal_id, goal in enumerate(generated_goals):
+                goal_node_id = goal[0]*env_grid.shape[1] + goal[1]
+                goal_distances[0, goal_id] = get_distance(env_graph, curr_node_id, goal_node_id)
+
+            # p(g|s) assumed to be proportional to 0.9^(distance_to_g)
+            decay_factor = 0.9
+            goal_probabilities = np.ones((1, len(generated_goals)))*decay_factor
+            goal_probabilities = goal_probabilities**goal_distances**1.5
+
+
+            for goal_id in range(len(generated_goals)):
+                avg_policies[i, j, 0, :] += goal_probabilities[0, goal_id]*state_policies[goal_id, :]
+
+            avg_policies[i, j, 0, :] = avg_policies[i, j, 0, :]/np.sum(avg_policies[i, j, 0, :])
+
+    return avg_policies
+
+
+
+
+# TODO write function that gets node id
+
+
 def main():
 
     env_grid = read_input_grid_from_file(FNAME_PLAN)
     env_graph = convert_grid_to_graph(env_grid)
     #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
-    generated_goals = [(0, 2), (2, 0), (2, env_grid.shape[1]-1)]
+    #generated_goals = [(0, 2), (2, 0), (2, env_grid.shape[1]-1), (5, 2)]
+    horiz_center = int(env_grid.shape[1]/2)
+    generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.shape[1]-1), (5, horiz_center)]
     policies = get_policies(env_grid, env_graph, generated_goals)
     value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
 
@@ -253,14 +290,17 @@ def main():
     plt.imshow(np.mean(value_functions, axis=2))
     plt.show()
 
-    colors = ["yellow", "red", "blue"]
+    colors = ["yellow", "red", "blue", "green"]
     offset = -0.3
     for g in range(len(generated_goals)):
         plot_optimal_actions(env_grid.shape[0], env_grid.shape[1], g, policies, offset, colors[g])
-        offset += 0.2
+        offset += 0.15
 
     ## plot average policy
-    avg_policies = np.mean(policies, axis=2, keepdims=True)
+    #avg_policies = np.mean(policies, axis=2, keepdims=True)
+
+    avg_policies = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
+
     plot_optimal_actions(env_grid.shape[0], env_grid.shape[1], 0, avg_policies, offset, "black")
 
     print("HALLO")
