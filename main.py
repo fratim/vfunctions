@@ -19,69 +19,201 @@ ACTIONID_TO_ACTION_DICT = {
     "4": "^",
 }
 
-def g_node_id(row, col, n_columns):
-    return row*n_columns + col
+PB_ACTIONS = [0, 1, 2, 3, 4]  # put, right, down, left, up
 
 
-def convert_grid_to_graph(grid, diagonal_movements_possible=False):
-    """
 
-    :param grid: input 2d numpy array grid
-    :return:
-    """
+class Grid:
 
-    graph = Graph(undirected=True)
+    def __init__(self, fname):
+        self.grid = self.read_from_map(fname)
 
-    for i in range(grid.shape[0]):
-        for j in range(grid.shape[1]):
+        self.nrows = self.grid.shape[0]
+        self.ncols = self.grid.shape[1]
+
+        self.all_coords = self.get_all_coords()
+
+        self.graph = None
+
+
+    def __getitem__(self, arg):
+        if len(arg) == 1:
+            return self.grid[self.coords_from_id(arg)]
+        elif len(arg) == 2:
+            return self.grid[arg]
+        else:
+            raise ValueError
+
+
+    def get_all_coords(self):
+        all_coords = []
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                all_coords.append((i, j))
+
+        return all_coords
+
+    def read_from_map(self, fname):
+        with open(fname, 'r') as f:
+            grid_map = f.readlines()
+
+        grid_map_array = np.array(
+            list(map(
+                lambda x: list(map(
+                    lambda y: int(y),
+                    x.split(' ')
+                )),
+                grid_map
+            ))
+        )
+        return grid_map_array
+
+
+    def coords_from_id(self, node_id):
+        out_j = node_id % self.ncols
+        out_i = node_id // self.ncols
+
+        return (out_i, out_j)
+
+
+    def id_from_coords(self, coords):
+        return coords[0] * self.ncols + coords[1]
+
+
+    def is_free(self, node_id):
+        if self.grid[self.coords_from_id(node_id)] == 0:
+            return True
+        else:
+            return False
+
+
+    def get_neighbor_node_id(self, input, direction):
+
+        if isinstance(input, int):
+            input_coords = self.coords_from_id(input)
+        elif isinstance(input, tuple):
+            input_coords = input
+        else:
+            raise NotImplementedError
+
+        input_i = input_coords[0]
+        input_j = input_coords[1]
+
+        if direction is None:
+            return self.id_from_coords((input_i, input_j))
+        elif direction == "east":
+            # add right edge if not last row and not blocked
+            if not (input_j + 1) < self.ncols:
+                return None
+            else:
+                return self.id_from_coords((input_i, input_j + 1))
+        elif direction == "southeast":
+            if not (input_i + 1) < self.nrows or not (input_j + 1) < self.ncols:
+                return None
+            else:
+                return self.id_from_coords((input_i + 1, input_j + 1))
+        elif direction == "south":
+            # add right edge if not last row and not blocked
+            if not (input_i + 1) < self.nrows:
+                return None
+            else:
+                return self.id_from_coords((input_i + 1, input_j))
+        elif direction == "west":
+            if not input_j > 0:
+                return None
+            else:
+                return self.id_from_coords((input_i, input_j - 1))
+        elif direction == "north":
+            if not input_i > 0:
+                return None
+            else:
+                return self.id_from_coords((input_i - 1, input_j))
+        else:
+            raise  NotImplementedError("Direction not implemented")
+
+
+    def convert_to_graph(self, diagonal_movements_possible=False):
+        """
+        :param grid: input 2d numpy array grid
+        :return:
+        """
+
+        graph = Graph(undirected=True)
+
+        for coords in self.all_coords:
+
+            node_id = self.id_from_coords(coords)
 
             # if node is blocked, no connections are established
-            if grid[i, j] != 0:
+            if not self.is_free(node_id):
                 continue
 
-            node_id = g_node_id(i, j, grid.shape[1])
-
-            # add right edge if not last row and not blocked
-            if (j + 1) < grid.shape[1] and grid[i, j + 1] == 0:
-                graph.add_edge(node_id, node_id + 1)
-
-            # add below edge if not outside of grid and not blocked
-            if (i + 1) < grid.shape[0] and grid[i + 1, j] == 0:
-                graph.add_edge(node_id, node_id + grid.shape[1])
-
+            directions = ["east", "south"]
             if diagonal_movements_possible:
-                # # add bottom right edge if not outside
-                if ((i + 1) < grid.shape[0] and (j + 1) < grid.shape[1]
-                        and grid[i + 1, j + 1] == 0):
-                    graph.add_edge(node_id, node_id + grid.shape[1] + 1)
+                directions += ["southwest, southeast"]
 
-    return graph
+            for direction in directions:
+                # add east node
+                neighboring_node = self.get_neighbor_node_id(node_id, direction)
+                if neighboring_node and self.is_free(neighboring_node):
+                    graph.add_edge(node_id, neighboring_node)
 
-
-def read_grid_map(grid_map_path):
-    with open(grid_map_path, 'r') as f:
-        grid_map = f.readlines()
-
-    grid_map_array = np.array(
-        list(map(
-            lambda x: list(map(
-                lambda y: int(y),
-                x.split(' ')
-            )),
-            grid_map
-        ))
-    )
-    return grid_map_array
+        self.graph = graph
 
 
-def read_input_grid_from_file(fname):
-    """
-    read from text file and return 2D array that is 0 where cells are unoccupied and 1 where occupied
-    :param fname: fname
-    :return: 2D np array
-    """
+    def get_distance(self, source_node_id, goal_node_id):
+        """
+        get distance between source node and goal node
+        if except, no path can be found and large distance is returned
+        :param graph:
+        :param source_node_id:
+        :param goal_node_id:
+        :return:
+        """
+        try:
+            return sum(find_path(self.graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
+        except:
+            return NODE_DISTANCE_IF_NO_PATH
 
-    return read_grid_map(fname)
+
+    def get_node_value(self, source_node_id, goal_node_id, gamma):
+        """
+        returns the value function value for a node, which is computed using the discount factor and the distance to goal
+        :param graph:
+        :param source_node_id:
+        :param goal_node_id:
+        :param gamma:
+        :return:
+        """
+        distance = self.get_distance(source_node_id, goal_node_id)
+        return gamma ** distance
+
+
+    def get_neighboring_distances(self, node_id, goal_node_id):
+        """
+        get the distance to goal for all neighboring cells of a specific cell
+        this can then be used to find the shortest-path action to the goal from a given cell
+        :param env_grid:
+        :param env_graph:
+        :param i:
+        :param j:
+        :param node_id:
+        :param goal_node_id:
+        :return:
+        """
+        pb_actions = PB_ACTIONS
+        goal_distances = np.ones((1, len(pb_actions))) * np.nan
+
+        # add right cell distance
+        directions = [None, "east", "south", "west", "north"]
+        for i, direction in enumerate(directions):
+            neighbor_node = self.get_neighbor_node_id(node_id, direction)
+            if neighbor_node:
+                goal_distances[0, i] = self.get_distance(neighbor_node, goal_node_id)
+            else:
+                goal_distances[0, i] = np.inf
+
+        return goal_distances
 
 
 def generate_random_goals(env_grid, n_goals, row_limits=None, column_limits=None):
@@ -89,19 +221,20 @@ def generate_random_goals(env_grid, n_goals, row_limits=None, column_limits=None
     generate n random goals within the grid that are given by coordinated of unoccupied cells
     :return: list of n_goals
     """
+
+    raise NotImplementedError
+
     if row_limits is None:
-        row_limits = (0, env_grid.shape[0])
+        row_limits = (0, env_grid.nrows)
     if column_limits is None:
-        column_limits = (0, env_grid.shape[1])
+        column_limits = (0, env_grid.ncols)
 
     generated_goals = list()
 
     if n_goals == "ALL":
-        for i in range(env_grid.shape[0]):
-            for j in range(env_grid.shape[1]):
-                coods = (i, j)
-                if env_grid[coods] == 0:
-                    generated_goals.append((i, j))
+        for coords in env_grid.all_coords:
+            if env_grid[coords] == 0:
+                generated_goals.append(coords)
         return generated_goals
 
 
@@ -110,41 +243,13 @@ def generate_random_goals(env_grid, n_goals, row_limits=None, column_limits=None
         j = np.random.randint(column_limits[0], column_limits[1])
 
         coods = (i, j)
-        if coods not in generated_goals and env_grid[coods] == 0:
+        if coods not in generated_goals and env_grid.is_free(coods):
             generated_goals.append(coods)
 
     return generated_goals
 
 
-def get_node_value(graph, source_node_id, goal_node_id, gamma):
-    """
-    returns the value function value for a node, which is computed using the discount factor and the distance to goal
-    :param graph:
-    :param source_node_id:
-    :param goal_node_id:
-    :param gamma:
-    :return:
-    """
-    distance = get_distance(graph, source_node_id, goal_node_id)
-    return gamma**distance
-
-
-def get_distance(graph, source_node_id, goal_node_id):
-    """
-    get distance between source node and goal node
-    if except, no path can be found and large distance is returned
-    :param graph:
-    :param source_node_id:
-    :param goal_node_id:
-    :return:
-    """
-    try:
-        return sum(find_path(graph, source_node_id, goal_node_id, cost_func=dummy_cost_func).costs)
-    except:
-        return NODE_DISTANCE_IF_NO_PATH
-
-
-def get_value_functions(env_grid, env_graph, generated_goals, gamma):
+def get_value_functions(env_grid, generated_goals, gamma):
     """
     generate 3D array that hold value functions for all n goals in generated goals list
     :param env_grid:
@@ -154,24 +259,23 @@ def get_value_functions(env_grid, env_graph, generated_goals, gamma):
 
     n_goals = len(generated_goals)
 
-    value_fcts = np.ones((env_grid.shape + (n_goals,))) * 0
+    value_fcts = np.ones((env_grid.nrows, env_grid.ncols, n_goals)) * 0
 
     for g, goal in enumerate(generated_goals):
 
         print(f"at {g} of {n_goals}")
 
         goal = generated_goals[g]
-        goal_node_id = g_node_id(*goal, env_grid.shape[1])
+        goal_node_id = env_grid.id_from_coords(goal)
 
-        for i in range(env_grid.shape[0]):
-            for j in range(env_grid.shape[1]):
-                node_id = g_node_id(i, j, env_grid.shape[1])
-                value_fcts[i, j, g] = get_node_value(env_graph, node_id, goal_node_id, gamma)
+        for coords in env_grid.all_coords:
+            node_id = env_grid.id_from_coords(coords)
+            value_fcts[coords][g] = env_grid.get_node_value(node_id, goal_node_id, gamma)
 
     return value_fcts
 
 
-def get_policies(env_grid, env_graph, generated_goals):
+def get_policies(env_grid, generated_goals):
     """
     generate 3D array that holds policy for all n goals in generated goals list
     :param env_grid:
@@ -180,79 +284,27 @@ def get_policies(env_grid, env_graph, generated_goals):
     """
 
     n_goals = len(generated_goals)
-
-    policies = np.ones((env_grid.shape + (n_goals, 5))) * np.nan
+    n_actions = len(PB_ACTIONS)
+    policies = np.ones((env_grid.nrows, env_grid.ncols, n_goals, n_actions)) * np.nan
 
     for g, goal in enumerate(generated_goals):
 
         print(f"at {g} of {n_goals}")
 
         goal = generated_goals[g]
-        goal_node_id = goal[0]*env_grid.shape[1] + goal[1]
+        goal_node_id = env_grid.id_from_coords(goal)
 
         node_id = 0
-        for i in range(env_grid.shape[0]):
-            for j in range(env_grid.shape[1]):
-                nb_distances = get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id)
-                policy = softmax(SOFTMAX_MULTIPLIER*1/(nb_distances+SOFTMAX_EPSILON))
-                policies[i, j, g, :] = policy
-                node_id += 1
+        for coords in env_grid.all_coords:
+            nb_distances = env_grid.get_neighboring_distances(node_id, goal_node_id)
+            policy = softmax(SOFTMAX_MULTIPLIER/(nb_distances+SOFTMAX_EPSILON))
+            policies[coords][g][:] = policy
+            node_id += 1
 
     return policies
 
 
-def get_neighboring_distances(env_grid, env_graph, i, j, node_id, goal_node_id):
-    """
-    get the distance to goal for all neighboring cells of a specific cell
-    this can then be used to find the shortest-path action to the goal from a given cell
-    :param env_grid:
-    :param env_graph:
-    :param i:
-    :param j:
-    :param node_id:
-    :param goal_node_id:
-    :return:
-    """
-    pb_actions = [0, 1, 2, 3, 4] # put, right, down, left, up
-    goal_distances = np.ones((1, len(pb_actions)))*np.nan
-
-    # add stay distance
-    goal_distances[0, 0] = get_distance(env_graph, node_id, goal_node_id)
-
-    # add right cell distance
-    if j < (env_grid.shape[1]-1):
-        env_right_node_id = node_id + 1
-        goal_distances[0, 1] = get_distance(env_graph, env_right_node_id, goal_node_id)
-    else:
-        goal_distances[0, 1] = np.inf
-
-    # add bottom cell distance
-    if i < (env_grid.shape[0]-1):
-        env_bottom_node_id = node_id + env_grid.shape[1]
-        goal_distances[0, 2] = get_distance(env_graph, env_bottom_node_id, goal_node_id)
-    else:
-        goal_distances[0, 2] = np.inf
-
-    # add left cell distance
-    if j > 0:
-        env_left_node_id = node_id - 1
-        goal_distances[0, 3] = get_distance(env_graph, env_left_node_id, goal_node_id)
-    else:
-        goal_distances[0, 3] = np.inf
-
-    # add top cell distance
-    if i > 0:
-        env_top_node_id = node_id - env_grid.shape[1]
-        goal_distances[0, 4] = get_distance(env_graph, env_top_node_id, goal_node_id)
-    else:
-        goal_distances[0, 4] = np.inf
-
-    # best_action = np.argwhere(goal_distances==np.min(goal_distances))[0][0]
-
-    return goal_distances
-
-
-def plot_optimal_actions(rows, cols, goal, distances, offset, color):
+def plot_optimal_actions(ax, rows, cols, goal, distances, offset, color):
     """
     plots action that is chosen with highest probability
     :param rows:
@@ -273,24 +325,23 @@ def plot_optimal_actions(rows, cols, goal, distances, offset, color):
                 best_action_icons.append(ACTIONID_TO_ACTION_DICT[str(action[0])])
 
             best_action_icons = ' '.join(best_action_icons)
-            plt.text(j, i+offset, best_action_icons, color=color, ha='center', va='center')
+            ax.text(j, i+offset, best_action_icons, color=color, ha='center', va='center')
 
 
-def compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid):
+def compute_weighted_average_policies(env_grid, policies, generated_goals):
 
-    avg_policies = np.zeros((env_grid.shape)+(1, policies.shape[-1], ))
+    n_actions = len(PB_ACTIONS)
+    avg_policies = np.zeros((env_grid.nrows, env_grid.ncols, 1, n_actions))
 
-    for i in range(policies.shape[0]):
-        for j in range(policies.shape[1]):
+    for coords in env_grid.all_coords:
+            curr_node_id = env_grid.id_from_coords(coords)
 
-            curr_node_id = i*env_grid.shape[1] + j
-
-            state_policies = policies[i, j, :, :]
+            state_policies = policies[coords][:, :]
             goal_distances = np.ones((1, len(generated_goals)))*np.nan
 
             for goal_id, goal in enumerate(generated_goals):
-                goal_node_id = g_node_id(*goal, env_grid.shape[1])
-                goal_distances[0, goal_id] = get_distance(env_graph, curr_node_id, goal_node_id)
+                goal_node_id = env_grid.id_from_coords(goal)
+                goal_distances[0, goal_id] = env_grid.get_distance(curr_node_id, goal_node_id)
 
             # p(g|s) assumed to be proportional to GOAL_ASSIGNMENT_DECAY_FACTOR^(distance_to_g)
             decay_factor = GOAL_ASSIGNMENT_DECAY_FACTOR
@@ -298,26 +349,30 @@ def compute_weighted_average_policies(policies, generated_goals, env_graph, env_
             goal_probabilities = goal_probabilities**goal_distances
 
             for goal_id in range(len(generated_goals)):
-                avg_policies[i, j, 0, :] += goal_probabilities[0, goal_id]*state_policies[goal_id, :]
+                avg_policies[coords][0, :] += goal_probabilities[0, goal_id]*state_policies[goal_id, :]
 
-            avg_policies[i, j, 0, :] = avg_policies[i, j, 0, :]/np.sum(avg_policies[i, j, 0, :])
+            avg_policies[coords][0, :] = avg_policies[coords][0, :]/np.sum(avg_policies[coords][0, :])
 
     return avg_policies
 
+
 def colorplot_values(ax, values):
     ax.imshow(values)
+
 
 def plot_optimal_action_for_all_goals(ax, policies, init_offset):
     colors = ["yellow", "red", "blue", "green"]
     offset = copy.deepcopy(init_offset)
     for g in range(policies.shape[2]):
-        plot_optimal_actions(policies.shape[0], policies.shape[1], g, policies, offset, colors[g])
+        plot_optimal_actions(ax, policies.shape[0], policies.shape[1], g, policies, offset, colors[g])
         offset += 0.15
 
     return offset
 
+
 def plot_optimal_action_for_average_policy(ax, avg_policy, curr_offset):
-    plot_optimal_actions(avg_policy.shape[0], avg_policy.shape[1], 0, avg_policy, curr_offset, "black")
+    plot_optimal_actions(ax, avg_policy.shape[0], avg_policy.shape[1], 0, avg_policy, curr_offset, "black")
+
 
 def plot_goal_positions(ax, goals):
     for goal in goals:
@@ -337,7 +392,7 @@ def plot_local_value_maxima(avg_values, goals):
         plt.plot(maximum[1], maximum[0], marker='v', color=color)
 
 
-def make_plots(value_functions, avg_values, policies, avg_policies, goals):
+def make_plots(avg_values, policies, avg_policies, goals):
     fig, ax = plt.subplots()
 
     # colorplot mean values
@@ -362,27 +417,27 @@ def make_plots(value_functions, avg_values, policies, avg_policies, goals):
 def main():
 
     # read grid and convert to graph
-    env_grid = read_input_grid_from_file(FNAME_PLAN)
-    env_graph = convert_grid_to_graph(env_grid)
+    env_grid = Grid(FNAME_PLAN)
+    env_grid.convert_to_graph(diagonal_movements_possible=False)
 
     # generate or specify goals
     #generated_goals = generate_random_goals(env_grid, N_GOALS, ROW_LIMITS, COLUMN_LIMITS)
-    horiz_center = int(env_grid.shape[1]/2)
-    generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.shape[1]-1), (5, horiz_center)]
+    horiz_center = int(env_grid.ncols/2)
+    generated_goals = [(0, horiz_center), (2, 0), (2, env_grid.ncols-1), (5, horiz_center)]
 
     # compute value functions for all goals
-    value_functions = get_value_functions(env_grid, env_graph, generated_goals, GAMMA)
+    value_functions = get_value_functions(env_grid, generated_goals, GAMMA)
 
 
     # compute policies for all goals
-    policies = get_policies(env_grid, env_graph, generated_goals)
+    policies = get_policies(env_grid, generated_goals)
     avg_values = np.mean(value_functions, axis=2)
 
     # compute weighted average policy
-    avg_policy = compute_weighted_average_policies(policies, generated_goals, env_graph, env_grid)
+    avg_policy = compute_weighted_average_policies(env_grid, policies, generated_goals)
 
     # make various plots
-    make_plots(value_functions, avg_values, policies, avg_policy, generated_goals)
+    make_plots(avg_values, policies, avg_policy, generated_goals)
 
 if __name__ == "__main__":
     main()
